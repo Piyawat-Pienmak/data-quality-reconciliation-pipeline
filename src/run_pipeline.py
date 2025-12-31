@@ -23,6 +23,7 @@ def _update_run_finish(
     recon_ok: bool | None,
     mismatch_count: int | None,
     failing_metric_count: int | None,
+    suppressed_mismatch_count: int | None,
     error_message: str | None,
 ):
     exec_sql(conn, """
@@ -33,18 +34,33 @@ def _update_run_finish(
           recon_ok = %s,
           mismatch_count = %s,
           failing_metric_count = %s,
+          suppressed_mismatch_count = %s,
           error_message = %s
       WHERE run_id = %s;
-    """, (status, tests_ok, recon_ok, mismatch_count, failing_metric_count, error_message, run_id))
+    """, (
+        status,
+        tests_ok,
+        recon_ok,
+        mismatch_count,
+        failing_metric_count,
+        suppressed_mismatch_count,
+        error_message,
+        run_id,
+    ))
 
-def _get_recon_counts(conn, run_id: str) -> tuple[int, int]:
+
+def _get_recon_counts(conn, run_id: str) -> tuple[int, int, int]:
     with conn.cursor() as cur:
         cur.execute("""
-          SELECT COUNT(*)
+          SELECT
+            SUM(CASE WHEN suppressed = false THEN 1 ELSE 0 END) AS active_cnt,
+            SUM(CASE WHEN suppressed = true  THEN 1 ELSE 0 END) AS suppressed_cnt
           FROM quality.recon_row_mismatches
           WHERE run_id = %s;
         """, (run_id,))
-        mismatch_count = cur.fetchone()[0]
+        active_cnt, suppressed_cnt = cur.fetchone()
+        active_cnt = active_cnt or 0
+        suppressed_cnt = suppressed_cnt or 0
 
         cur.execute("""
           SELECT COUNT(*)
@@ -53,7 +69,7 @@ def _get_recon_counts(conn, run_id: str) -> tuple[int, int]:
         """, (run_id,))
         failing_metric_count = cur.fetchone()[0]
 
-    return mismatch_count, failing_metric_count
+    return active_cnt, failing_metric_count, suppressed_cnt
 
 def main():
     run_id = str(uuid.uuid4())
@@ -81,7 +97,7 @@ def main():
 
         build_marts(conn)
 
-        mismatch_count, failing_metric_count = _get_recon_counts(conn, run_id)
+        mismatch_count, failing_metric_count, suppressed_mismatch_count = _get_recon_counts(conn, run_id)
 
         status = "SUCCESS" if (tests_ok and recon_ok) else "FAIL"
         _update_run_finish(
@@ -92,12 +108,13 @@ def main():
             recon_ok=recon_ok,
             mismatch_count=mismatch_count,
             failing_metric_count=failing_metric_count,
+            suppressed_mismatch_count=suppressed_mismatch_count,
             error_message=None,
         )
 
         conn.commit()
 
-        print(f"[run] run_id={run_id} status={status} data_dir={data_dir} mismatches={mismatch_count} failing_metrics={failing_metric_count}")
+        print(f"[run] run_id={run_id} status={status} data_dir={data_dir} mismatches={mismatch_count} suppressed={suppressed_mismatch_count} failing_metrics={failing_metric_count}")
 
         if status != "SUCCESS":
             sys.exit(1)
@@ -121,6 +138,7 @@ def main():
                 recon_ok=None,
                 mismatch_count=None,
                 failing_metric_count=None,
+                suppressed_mismatch_count=None,
                 error_message=str(e),
             )
             conn.commit()

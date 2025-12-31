@@ -90,6 +90,29 @@ CREATE TABLE IF NOT EXISTS quality.pipeline_runs (
   error_message       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS quality.recon_exceptions (
+  mismatch_type TEXT NOT NULL,
+  key           TEXT NOT NULL,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  ticket_id     TEXT NOT NULL,
+  reason        TEXT NOT NULL,
+  created_ts    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (mismatch_type, key)
+);
+
+ALTER TABLE quality.recon_row_mismatches
+  ADD COLUMN IF NOT EXISTS suppressed BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE quality.recon_row_mismatches
+  ADD COLUMN IF NOT EXISTS exception_ticket_id TEXT;
+
+ALTER TABLE quality.recon_row_mismatches
+  ADD COLUMN IF NOT EXISTS exception_expires_at TIMESTAMPTZ;
+
+ALTER TABLE quality.pipeline_runs
+  ADD COLUMN IF NOT EXISTS suppressed_mismatch_count INTEGER;
+
+
 """
 
 def create_all(conn):

@@ -24,29 +24,47 @@ def reconcile(conn, run_id: str, tolerance_pct: Decimal = Decimal("0.0")) -> boo
         AND p.status = 'PAID';
     """, (run_id,))
 
+    # Mark suppressed mismatches using exceptions (not expired)
+    exec_sql(conn, """
+      UPDATE quality.recon_row_mismatches m
+      SET suppressed = true,
+          exception_ticket_id = e.ticket_id,
+          exception_expires_at = e.expires_at
+      FROM quality.recon_exceptions e
+      WHERE m.run_id = %s
+        AND m.mismatch_type = e.mismatch_type
+        AND m.key = e.key
+        AND e.expires_at > now();
+    """, (run_id,))
+
+
     # Count mismatches + print sample
     with conn.cursor() as cur:
         cur.execute("""
-          SELECT COUNT(*)
+          SELECT
+            SUM(CASE WHEN suppressed = false THEN 1 ELSE 0 END) AS active_cnt,
+            SUM(CASE WHEN suppressed = true  THEN 1 ELSE 0 END) AS suppressed_cnt
           FROM quality.recon_row_mismatches
           WHERE run_id = %s;
         """, (run_id,))
-        mismatch_count = cur.fetchone()[0]
+        active_cnt, suppressed_cnt = cur.fetchone()
+        active_cnt = active_cnt or 0
+        suppressed_cnt = suppressed_cnt or 0
 
-    print(f"[recon] row_mismatches={mismatch_count}")
+    print(f"[recon] row_mismatches active={active_cnt} suppressed={suppressed_cnt}")
 
-    if mismatch_count > 0:
+    if active_cnt > 0:
         with conn.cursor() as cur:
             cur.execute("""
               SELECT mismatch_type, key, details
               FROM quality.recon_row_mismatches
-              WHERE run_id = %s
+              WHERE run_id = %s AND suppressed = false
               ORDER BY run_ts
               LIMIT 20;
             """, (run_id,))
             sample = cur.fetchall()
 
-        print("[recon] mismatch sample (first 20):")
+        print("[recon] mismatch sample (active, first 20):")
         for mt, k, d in sample:
             print(f"  - {mt}: {k} | {d}")
 
@@ -128,7 +146,8 @@ def reconcile(conn, run_id: str, tolerance_pct: Decimal = Decimal("0.0")) -> boo
             print("  -", line)
 
     # STRICT GATE: mismatches => fail
-    if mismatch_count > 0:
+    if active_cnt > 0:
         passed_all = False
+
 
     return passed_all

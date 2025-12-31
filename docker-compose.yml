@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: dq_pg
+    environment:
+      POSTGRES_PASSWORD: pass
+      POSTGRES_USER: postgres
+      POSTGRES_DB: dq
+    ports:
+      - "5432:5432"
+    volumes:
+      - dq_pg_data:/var/lib/postgresql/data
+
+volumes:
+  dq_pg_data:

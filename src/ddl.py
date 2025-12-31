@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS marts.fact_revenue_daily (
   paid_amount NUMERIC NOT NULL,
   paid_count  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS quality.pipeline_runs (
+  run_id              TEXT PRIMARY KEY,
+  data_dir            TEXT NOT NULL,
+  git_sha             TEXT,
+  started_ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_ts         TIMESTAMPTZ,
+  status              TEXT,        -- SUCCESS | FAIL | ERROR
+  tests_ok            BOOLEAN,
+  recon_ok            BOOLEAN,
+  mismatch_count      INTEGER,
+  failing_metric_count INTEGER,
+  error_message       TEXT
+);
+
 """
 
 def create_all(conn):

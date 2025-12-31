@@ -5,7 +5,8 @@ on:
   pull_request:
 
 jobs:
-  pipeline:
+  pass_good_dataset:
+    name: PASS (data_good)
     runs-on: ubuntu-latest
 
     services:
@@ -58,9 +59,80 @@ jobs:
               raise SystemExit("Postgres not ready")
           PY
 
-      - name: Run pipeline (strict gate)
+      - name: Run pipeline (should PASS)
         env:
           DATABASE_URL: postgresql://postgres:pass@localhost:5432/dq
           DATA_DIR: data_good
         run: |
           python -m src.run_pipeline
+
+
+  expected_fail_bad_dataset:
+    name: EXPECTED FAIL (data)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DB: dq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d dq"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for Postgres
+        env:
+          DATABASE_URL: postgresql://postgres:pass@localhost:5432/dq
+        run: |
+          python - <<'PY'
+          import os, time
+          import psycopg
+          url = os.environ["DATABASE_URL"]
+          for i in range(30):
+              try:
+                  with psycopg.connect(url) as conn:
+                      pass
+                  print("Postgres is ready")
+                  break
+              except Exception as e:
+                  print("Waiting for Postgres...", e)
+                  time.sleep(1)
+          else:
+              raise SystemExit("Postgres not ready")
+          PY
+
+      - name: Run pipeline (should FAIL)
+        env:
+          DATABASE_URL: postgresql://postgres:pass@localhost:5432/dq
+          DATA_DIR: data
+        run: |
+          set +e
+          python -m src.run_pipeline
+          code=$?
+          echo "pipeline exit code: $code"
+          if [ $code -eq 1 ]; then
+            echo "Expected failure occurred (strict reconciliation gate)."
+            exit 0
+          fi
+          echo "Unexpected result. Expected exit code 1 but got $code"
+          exit 1
